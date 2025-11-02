@@ -1,0 +1,154 @@
+---
+title: "Assignment 10A – Sentiment Analysis"
+author: "Kevin Martin"
+date: "2025-11-01"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This analysis follows the workflow in *Text Mining with R*, Chapter 2 (“Sentiment analysis with tidy data”) and then extends it to Week 10 discussion text. 
+
+## Packages
+
+```{r packages}
+library(tidyverse)
+library(tidytext)
+library(janeaustenr)  # for the book example
+```
+
+## Jane Austen Books
+
+```{r Jane_Austen}
+# Get Jane Austen books and make them tidy
+austen <- janeaustenr::austen_books() %>%
+  group_by(book) %>%
+  mutate(linenumber = row_number()) %>%
+  ungroup()
+
+tidy_austen <- austen %>%
+  unnest_tokens(word, text)
+
+# Get a sentiment lexicon from tidytext
+bing_lex <- get_sentiments("bing")
+
+austen_sent <- tidy_austen %>%
+  inner_join(bing_lex, by = "word") %>%
+  count(book, sentiment) %>%
+  tidyr::pivot_wider(names_from = sentiment,
+                     values_from = n,
+                     values_fill = 0) %>%
+  mutate(net_sentiment = positive - negative)
+
+austen_sent
+```
+
+## corpus
+
+```{r corpus}
+# ---- corpus ----
+my_posts <- tibble::tibble(
+  source = c("Kevin_discussion", "Candace_post", "Joao_post", "Kevin_reaction"),
+  text = c(
+    "I described a use case where I had to process multiple JSON files from different folders.",
+    "Candace talked about using Microsoft Graph JSON batching to reduce network roundtrips.",
+    "Joao described e-commerce JSON files with product, customer, and revenue data.",
+    "This workflow is really helpful but a little frustrating when the JSON is deeply nested."
+  )
+)
+
+tidy_posts <- my_posts %>%
+  unnest_tokens(word, text)
+  # NOTE: we are NOT removing stop words yet because corpus is small
+
+# ---- diagnostic: what matched bing? ----
+tidy_posts %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(source, sentiment, word, sort = TRUE)
+```
+
+## bing_posts
+
+```{r bing_posts}
+# all sources
+all_sources <- tidy_posts %>%
+  dplyr::distinct(source)
+
+bing_posts <- tidy_posts %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(source, sentiment) %>%
+  tidyr::pivot_wider(
+    names_from = sentiment,
+    values_from = n,
+    values_fill = list(n = 0)
+  ) %>%
+  # make sure both columns exist
+  { if (!"positive" %in% names(.)) dplyr::mutate(., positive = 0L) else . } %>%
+  { if (!"negative" %in% names(.)) dplyr::mutate(., negative = 0L) else . } %>%
+  dplyr::mutate(net_sentiment = positive - negative) %>%
+  # join back to show sources with 0 matches
+  right_join(all_sources, by = "source") %>%
+  # replace NAs from right_join
+  mutate(
+    positive = tidyr::replace_na(positive, 0L),
+    negative = tidyr::replace_na(negative, 0L),
+    net_sentiment = tidyr::replace_na(net_sentiment, 0L)
+  )
+
+bing_posts
+```
+
+## afinn_posts
+
+```{r afinn_posts}
+# ---- afinn_posts ----
+afinn_posts <- tidy_posts %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(source) %>%
+  summarise(afinn_score = sum(value), .groups = "drop")
+
+afinn_posts
+```
+
+## Loughran posts
+```{r loughran_posts}
+# ---- loughran_posts ----
+loughran_posts <- tidy_posts %>%
+  inner_join(get_sentiments("loughran"), by = "word") %>%
+  count(source, sentiment, sort = TRUE) %>%
+  tidyr::pivot_wider(
+    names_from = sentiment,
+    values_from = n,
+    values_fill = 0
+  )
+
+loughran_posts
+```
+
+### Notes
+
+I first reproduced the sentiment example from *Text Mining with R*, Chapter 2 to make sure my setup was correct. I then created a small corpus from Week 10 discussion content (my post and two classmates’ posts about JSON). I applied two different sentiment lexicons (`bing` and `afinn`) to show that the same text can get scored in slightly different ways depending on the dictionary. This matches the assignment instructions. 
+
+### Summary & Reflection
+
+This assignment helped me explore how different sentiment lexicons—Bing, AFINN, and Loughran—analyze text and how their results change depending on the type of language used. The Bing lexicon worked best for my short dataset since it contained a few subjective words like helpful and frustrating. The AFINN lexicon didn’t return any matches because my text didn’t include emotional words that carry numeric values, and the Loughran lexicon, which is designed for financial or business contexts, showed how domain-specific tools can be more suitable for certain topics.
+
+Even though I reviewed the materials beforehand, I didn’t think about how little emotional vocabulary my chosen text would include. Since my discussion post focused on processing JSON files, I thought it would be interesting to reuse that same topic for sentiment analysis. Once I ran it, I saw that most of the words were technical and neutral, which meant the results were limited and didn’t produce visuals like the example bar chart in the textbook.
+
+I briefly considered switching to a more emotional dataset just to get more colorful results, but the concept still worked—and I liked the connection to my discussion topic. This showed me that sentiment analysis depends heavily on the type of text being analyzed. Some topics, like data processing or technical writing, naturally contain less emotion, and that’s fine—the key is understanding why that happens.
+
+If I wanted to see a wider emotional range, I could have used:
+
+Product or restaurant reviews (e.g., “The food was amazing, but the service was terrible.”)
+
+Movie reviews or social media posts (e.g., “I love this show!” or “This update completely ruined it.”)
+
+News articles or blog comments about topics that trigger opinions or emotions.
+
+Overall, this project reminded me that sentiment tools aren’t one-size-fits-all; the results only make sense when the dataset fits the type of analysis.
